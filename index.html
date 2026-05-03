@@ -1,0 +1,140 @@
+<script>
+// ===== UPGRADE PATCH =====
+
+// HAPTIC FEEDBACK
+function haptic(type="light"){
+  if(navigator.vibrate){
+    if(type==="light") navigator.vibrate(10);
+    if(type==="medium") navigator.vibrate(20);
+    if(type==="heavy") navigator.vibrate([30,20,30]);
+  }
+}
+document.addEventListener('click', e=>{
+  if(e.target.closest('button,.btn-p,.btn-s,.nb')) haptic("light");
+});
+
+// SAVE LAST TAB
+const oldSw = sw;
+sw = function(t){
+  localStorage.setItem('last_tab', t);
+  oldSw(t);
+};
+
+// LOAD LAST TAB
+setTimeout(()=>{
+  const last = localStorage.getItem('last_tab');
+  if(last && renders[last]) sw(last);
+},100);
+
+// PREVENT ZOOM (APP FEEL)
+document.addEventListener('gesturestart', e=>e.preventDefault());
+document.addEventListener('dblclick', e=>e.preventDefault());
+
+// BETTER NOTIFICATIONS
+let lastNotifTime = 0;
+function sN(title,body){
+  const now = Date.now();
+  if(now - lastNotifTime < 60000) return; // anti-spam
+  lastNotifTime = now;
+
+  if(Notification.permission==='granted'){
+    try{
+      new Notification('Ashwakanda — '+title,{body});
+    }catch{}
+  }
+}
+
+// INSTALL PROMPT
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e)=>{
+  e.preventDefault();
+  deferredPrompt = e;
+
+  // optional UI hook
+  console.log("App install available");
+});
+
+window.installApp = async function(){
+  if(!deferredPrompt) return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+};
+
+// OFFLINE DETECTION
+function isOnline(){ return navigator.onLine; }
+
+async function safeAI(fn){
+  if(!isOnline()){
+    toast('No internet connection','warn');
+    return null;
+  }
+  try{
+    return await fn();
+  }catch{
+    toast('AI unavailable','warn');
+    return null;
+  }
+}
+
+// PATCH AI CALLS
+const oldCallAI = callAI;
+callAI = async function(...args){
+  return await safeAI(()=>oldCallAI(...args));
+};
+
+const oldCallAIV = callAIV;
+callAIV = async function(...args){
+  return await safeAI(()=>oldCallAIV(...args));
+};
+
+// BETTER SERVICE WORKER
+if('serviceWorker' in navigator){
+  const swCode = `
+  const CACHE = 'ashwakanda-v2';
+  const ASSETS = ['/'];
+
+  self.addEventListener('install', e=>{
+    e.waitUntil(
+      caches.open(CACHE).then(c=>c.addAll(ASSETS))
+    );
+    self.skipWaiting();
+  });
+
+  self.addEventListener('activate', e=>{
+    e.waitUntil(
+      caches.keys().then(keys=>{
+        return Promise.all(
+          keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))
+        );
+      })
+    );
+  });
+
+  self.addEventListener('fetch', e=>{
+    e.respondWith(
+      caches.match(e.request).then(res=>{
+        return res || fetch(e.request).catch(()=>{
+          return new Response('Offline',{status:200});
+        });
+      })
+    );
+  });
+  `;
+  navigator.serviceWorker.register(
+    URL.createObjectURL(new Blob([swCode],{type:'application/javascript'}))
+  ).catch(()=>{});
+}
+
+// REDUCE RE-RENDERS
+let lastRender = 0;
+const oldRenderHome = renderHome;
+renderHome = function(){
+  const now = Date.now();
+  if(now - lastRender < 2000) return;
+  lastRender = now;
+  oldRenderHome();
+};
+
+// ===== END PATCH =====
+</script>
